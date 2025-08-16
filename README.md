@@ -11,16 +11,13 @@ A simple Flask web app that analyzes an uploaded audio file for onsets and gener
 ### FFmpeg (optional, for rendering)
 Rendering videos/images requires FFmpeg. If it is not available, the app still works for analysis; rendering will be skipped with a friendly message.
 
-To include FFmpeg on Railway, set this project variable:
-
-- `NIXPACKS_INSTALL_PKGS=ffmpeg`
-
-Alternatively, add FFmpeg in your service’s Nixpacks settings in the Railway dashboard.
+To include FFmpeg on Railway, enable it in the Nixpacks settings in the Railway dashboard (Install Packages → `ffmpeg`).
 
 ### Environment
 
 Optional variables:
 - `FLASK_SECRET` — Flask session secret (defaults to "dev-secret").
+ - Python version is pinned via `runtime.txt` (3.11.9). No extra nixpacks.toml is required.
 
 ### Health check
 
