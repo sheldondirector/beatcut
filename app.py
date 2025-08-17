@@ -44,6 +44,11 @@ INDEX_HTML = """
         .progress-msg { font-size: 1.2rem; font-weight: 500; color: #1e3a8a; text-align: center; max-width: 320px; }
         .progress-substep { font-size: 0.9rem; color: #64748b; margin-top: 0.5rem; }
         @keyframes spin { 100% { transform: rotate(360deg); } }
+        .or-divider { text-align: center; position: relative; margin: 1.5rem 0; }
+        .or-divider::before { content: ''; position: absolute; left: 0; top: 50%; width: 45%; height: 1px; background: #ddd; }
+        .or-divider::after { content: ''; position: absolute; right: 0; top: 50%; width: 45%; height: 1px; background: #ddd; }
+        .nav-buttons { display: flex; justify-content: center; gap: 1rem; margin-top: 2rem; }
+        .nav-buttons a { flex: 1; text-align: center; }
     </style>
 </head>
 <body>
@@ -53,13 +58,25 @@ INDEX_HTML = """
         {% with messages = get_flashed_messages() %}
             {% if messages %}<article>{% for m in messages %}<p>{{m}}</p>{% endfor %}</article>{% endif %}
         {% endwith %}
-        <form id=\"mainForm\" action=\"{{ url_for('upload_audio') }}\" method=\"post\" enctype=\"multipart/form-data\">
+        
+        <form id=\"audioForm\" action=\"{{ url_for('upload_audio') }}\" method=\"post\" enctype=\"multipart/form-data\">
             <div class=\"form-group\">
                 <label for=\"audio\"><b>Upload Audio Track</b></label>
-                <input type=\"file\" id=\"audio\" name=\"audio\" accept=\".mp3,.wav,.flac,.ogg,.m4a,audio/*\" required>
+                <input type=\"file\" id=\"audio\" name=\"audio\" accept=\".mp3,.wav,.flac,.ogg,.m4a,audio/*\">
+                <small>Supported formats: MP3, WAV, FLAC, OGG, M4A</small>
             </div>
+            
+            <div class=\"or-divider\">OR</div>
+            
+            <div class=\"form-group\">
+                <label for=\"video_for_audio\"><b>Extract Audio from Video</b></label>
+                <input type=\"file\" id=\"video_for_audio\" name=\"video_for_audio\" accept=\"video/*\">
+                <small>Supported formats: MP4, MOV, etc. (any video with audio track)</small>
+            </div>
+            
             <button type=\"submit\" style=\"width:100%;font-size:1.2rem;margin-top:1rem;\">Analyze Audio</button>
         </form>
+        
         <div class=\"spinner-overlay\" id=\"spinnerOverlay\">
             <div class=\"spinner\"></div>
             <div class=\"progress-msg\" id=\"progressMsg\">Processing audio file...</div>
@@ -67,8 +84,38 @@ INDEX_HTML = """
         </div>
     </main>
     <script>
-        document.getElementById('mainForm').addEventListener('submit', function() {
+        // Form validation - ensure either audio or video is uploaded
+        document.getElementById('audioForm').addEventListener('submit', function(e) {
+            const audioFile = document.getElementById('audio').files.length;
+            const videoFile = document.getElementById('video_for_audio').files.length;
+            
+            if (audioFile === 0 && videoFile === 0) {
+                e.preventDefault();
+                alert('Please upload either an audio file or a video to extract audio from.');
+                return false;
+            }
+            
+            // Show spinner during processing
             document.getElementById('spinnerOverlay').style.display = 'flex';
+            
+            // If video is selected, update the progress message
+            if (videoFile > 0) {
+                document.getElementById('progressMsg').textContent = 'Extracting audio from video...';
+                document.getElementById('progressSubstep').textContent = 'This may take a moment';
+            }
+        });
+        
+        // When audio is selected, clear video selection and vice versa
+        document.getElementById('audio').addEventListener('change', function() {
+            if (this.files.length > 0) {
+                document.getElementById('video_for_audio').value = '';
+            }
+        });
+        
+        document.getElementById('video_for_audio').addEventListener('change', function() {
+            if (this.files.length > 0) {
+                document.getElementById('audio').value = '';
+            }
         });
     </script>
 </body>
@@ -116,6 +163,7 @@ ANALYSIS_RESULT_HTML = """
         <div class=\"audio-info\">
             <h4>Analysis Complete</h4>
             <p><b>File:</b> {{ audio_filename }}</p>
+            <p><b>Source:</b> {{ audio_source }}</p>
             <p><b>Duration:</b> {{ duration }} seconds</p>
             <p><b>Segments found:</b> {{ num_segments }}</p>
         </div>
@@ -532,33 +580,34 @@ def _ffprobe_bin() -> str:
     # Default fallback
     return "ffprobe"
 
-def run_cmd(cmd: List[str], cwd: str | Path | None = None):
-    """Run a subprocess and raise with captured logs on failure (friendlier Flask flash)."""
+def extract_audio_from_video(video_path, output_audio_path):
+    """Extract audio track from a video file using FFmpeg."""
+    ffmpeg = _ffmpeg_bin()
+    cmd = [
+        ffmpeg,
+        "-i", str(video_path),
+        "-vn",                 # No video
+        "-acodec", "libmp3lame",  # MP3 codec
+        "-q:a", "2",           # Quality (lower is better)
+        "-y",                  # Overwrite output
+        str(output_audio_path)
+    ]
+    
     try:
-        # Print the command being executed for debugging
-        print(f"Executing command: {' '.join(cmd)}")
-        
-        # Add PATH environment variable to help find executables
-        env = os.environ.copy()
-        extra_paths = ["/usr/local/bin", "/opt/ffmpeg/bin"]
-        env["PATH"] = os.pathsep.join(extra_paths + [env.get("PATH", "")])
-        
-        proc = subprocess.run(cmd, cwd=str(cwd) if cwd else None, text=True, capture_output=True, env=env)
-        
-        if proc.returncode != 0:
-            error_msg = (
-                f"Command failed (exit {proc.returncode})\n"
-                f"CMD: {' '.join(cmd)}\n"
-                f"--- STDOUT ---\n{proc.stdout or ''}\n"
-                f"--- STDERR ---\n{proc.stderr or ''}"
-            )
-            print(error_msg)  # Log to console/logs
-            raise RuntimeError(error_msg)
-        return proc
-    except FileNotFoundError as e:
-        error_msg = f"Command not found: {cmd[0]}\nMake sure FFmpeg is installed and in PATH.\nError: {str(e)}"
-        print(error_msg)  # Log to console/logs
-        raise RuntimeError(error_msg)
+        print(f"Extracting audio from video: {video_path}")
+        run_cmd(cmd)
+        return True
+    except Exception as e:
+        print(f"Failed to extract audio: {e}")
+        return False
+
+# Helper function to run shell commands
+
+def run_cmd(cmd, cwd=None):
+    """Run a command using subprocess.run and raise an error if it fails."""
+    import subprocess
+    print(f"Running command: {' '.join(cmd)}")
+    subprocess.run(cmd, check=True, cwd=cwd)
 
 # ---------------- signal processing ----------------
 
@@ -783,10 +832,13 @@ def index():
 @app.route("/upload-audio", methods=["POST"])
 def upload_audio():
     audio_file = request.files.get("audio")
+    video_file = request.files.get("video_for_audio")
+    
     if not audio_file or audio_file.filename == "":
-        flash("Please upload an audio file.")
-        return redirect(url_for("index"))
-
+        if not video_file or video_file.filename == "":
+            flash("Please upload either an audio file or a video to extract audio from.")
+            return redirect(url_for("index"))
+    
     # Fixed values for simplified UX
     fps = 30  # Default fixed at 30 FPS
     threshold = 0.30
@@ -800,9 +852,26 @@ def upload_audio():
     job_dir = JOBS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save audio file
-    audio_path = job_dir / audio_file.filename
-    audio_file.save(str(audio_path))
+    # Process the uploaded files
+    if audio_file and audio_file.filename != "":
+        # Save audio file directly
+        audio_filename = audio_file.filename
+        audio_path = job_dir / audio_filename
+        audio_file.save(str(audio_path))
+    else:
+        # Extract audio from video
+        video_filename = video_file.filename
+        video_path = job_dir / video_filename
+        video_file.save(str(video_path))
+        
+        # Generate audio filename based on the video name
+        audio_filename = os.path.splitext(video_filename)[0] + ".mp3"
+        audio_path = job_dir / audio_filename
+        
+        # Extract the audio
+        if not extract_audio_from_video(video_path, audio_path):
+            flash("Failed to extract audio from the video. Please try a different file.")
+            return redirect(url_for("index"))
 
     try:
         # Analyze audio
@@ -816,7 +885,7 @@ def upload_audio():
 
         # Save data
         data = {
-            "audio": audio_file.filename,
+            "audio": audio_filename,
             "fps": fps,
             "max_gap": max_gap,
             "events_onsets": events,
@@ -835,13 +904,23 @@ def upload_audio():
         # Create waveform visualization
         plot_waveform(job_dir / "waveform.png", y, sr, flash_times, (flash_start, flash_end))
         
+        # Record the source of the audio (direct upload or extracted from video)
+        if video_file and video_file.filename != "":
+            data["audio_source"] = "extracted_from_video"
+            data["original_video"] = video_filename
+        else:
+            data["audio_source"] = "direct_upload"
+        
+        (job_dir / "cuts.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+        
         # Redirect to analysis results page
         return render_template_string(
             ANALYSIS_RESULT_HTML,
             job_id=job_id,
-            audio_filename=audio_file.filename,
+            audio_filename=audio_filename,
             duration=round(duration, 1),
-            num_segments=len(starts)
+            num_segments=len(starts),
+            audio_source="Video" if video_file and video_file.filename != "" else "Audio Upload"
         )
     except Exception as e:
         flash(f"Failed to analyze audio: {str(e)}")
@@ -895,7 +974,7 @@ def preview_media(job_id):
     
     # Process images
     for f in request.files.getlist("images"):
-        if f and f.filename.lower().endswith(".png"):
+        if f and f.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp')):
             dst = job_dir / f.filename
             f.save(str(dst))
             media_files.append({"type": "image", "filename": f.filename})
