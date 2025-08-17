@@ -39,9 +39,6 @@ INDEX_HTML = """
         .centered { max-width: 480px; margin: 2rem auto; background: #fff; border-radius: 16px; box-shadow: 0 2px 16px #0001; padding: 2rem; }
         .logo { display: block; margin: 0 auto 1.5rem; width: 64px; }
         .form-group { margin-bottom: 1.5rem; }
-        .advanced { display: none; margin-top: 1.5rem; }
-        .show-advanced .advanced { display: block; }
-        .toggle-adv { color: #2563eb; background: none; border: none; cursor: pointer; font-size: 1rem; margin-bottom: 1rem; }
         .spinner-overlay { display: none; position: fixed; z-index: 9999; inset: 0; background: rgba(255,255,255,0.8); align-items: center; justify-content: center; flex-direction: column; }
         .spinner { border: 6px solid #eee; border-top: 6px solid #2563eb; border-radius: 50%; width: 48px; height: 48px; animation: spin 1s linear infinite; margin-bottom: 1.5rem; }
         .progress-msg { font-size: 1.2rem; font-weight: 500; color: #1e3a8a; text-align: center; max-width: 320px; }
@@ -56,85 +53,318 @@ INDEX_HTML = """
         {% with messages = get_flashed_messages() %}
             {% if messages %}<article>{% for m in messages %}<p>{{m}}</p>{% endfor %}</article>{% endif %}
         {% endwith %}
-        <form id=\"mainForm\" action=\"{{ url_for('analyze') }}\" method=\"post\" enctype=\"multipart/form-data\">
+        <form id=\"mainForm\" action=\"{{ url_for('upload_audio') }}\" method=\"post\" enctype=\"multipart/form-data\">
             <div class=\"form-group\">
-                <label for=\"audio\"><b>Audio File</b></label>
+                <label for=\"audio\"><b>Upload Audio Track</b></label>
                 <input type=\"file\" id=\"audio\" name=\"audio\" accept=\".mp3,.wav,.flac,.ogg,.m4a,audio/*\" required>
             </div>
-            <div class=\"form-group\">
-                <label for=\"fps\"><b>Frames per Second (FPS)</b></label>
-                <input type=\"number\" id=\"fps\" name=\"fps\" step=\"1\" min=\"10\" max=\"120\" value=\"30\" required>
-            </div>
-            <button type=\"button\" class=\"toggle-adv\" onclick=\"document.body.classList.toggle('show-advanced')\">Show advanced options</button>
-            <div class=\"advanced\">
-                <div class=\"form-group\">
-                    <label>Aspect Ratio</label>
-                    <select name=\"aspect_ratio\">
-                        <option value=\"16:9\" selected>16:9 (widescreen)</option>
-                        <option value=\"1:1\">1:1 (square)</option>
-                        <option value=\"9:16\">9:16 (vertical)</option>
-                        <option value=\"4:3\">4:3</option>
-                    </select>
-                </div>
-                <div class=\"form-group\">
-                    <label for=\"threshold\">Onset threshold</label>
-                    <input type=\"number\" id=\"threshold\" name=\"threshold\" step=\"0.01\" min=\"0\" max=\"1\" value=\"0.30\">
-                </div>
-                <div class=\"form-group\">
-                    <label for=\"max_gap\">Max gap (s)</label>
-                    <input type=\"number\" id=\"max_gap\" name=\"max_gap\" step=\"0.05\" min=\"0.1\" max=\"10\" value=\"5.0\">
-                </div>
-                <div class=\"form-group\">
-                    <label>Flash window</label>
-                    <div style=\"display:flex;gap:0.5rem;\">
-                        <input type=\"number\" name=\"flash_start\" step=\"0.1\" value=\"10\" placeholder=\"Start (s)\">
-                        <input type=\"number\" name=\"flash_end\" step=\"0.1\" value=\"25\" placeholder=\"End (s)\">
-                        <input type=\"number\" name=\"flash_gap\" step=\"0.01\" value=\"0.12\" placeholder=\"Min gap (s)\">
-                    </div>
-                </div>
-                <div class=\"form-group\">
-                    <label><input type=\"checkbox\" name=\"do_render\" value=\"1\" checked> Render video with ffmpeg</label>
-                </div>
-                <div class=\"form-group\">
-                    <label>Video clips (multiple)</label>
-                    <input type=\"file\" name=\"videos\" accept=\"video/*\" multiple>
-                </div>
-                <div class=\"form-group\">
-                    <label>PNG images (multiple)</label>
-                    <input type=\"file\" name=\"images\" accept=\"image/png\" multiple>
-                </div>
-                <div class=\"form-group\">
-                    <label>Clip portion</label>
-                    <select name=\"clip_mode\"><option value=\"head\" selected>Head (start)</option><option value=\"tail\">Tail (end)</option></select>
-                </div>
-                <div class=\"form-group\">
-                    <label>Output file name</label>
-                    <input type=\"text\" name=\"output_name\" value=\"final_video.mp4\">
-                </div>
-            </div>
-            <button type=\"submit\" style=\"width:100%;font-size:1.2rem;margin-top:1.5rem;\">Analyze</button>
+            <button type=\"submit\" style=\"width:100%;font-size:1.2rem;margin-top:1rem;\">Analyze Audio</button>
         </form>
         <div class=\"spinner-overlay\" id=\"spinnerOverlay\">
             <div class=\"spinner\"></div>
-            <div class=\"progress-msg\" id=\"progressMsg\">Preparing to analyze...</div>
-            <div class=\"progress-substep\" id=\"progressSubstep\"></div>
+            <div class=\"progress-msg\" id=\"progressMsg\">Processing audio file...</div>
+            <div class=\"progress-substep\" id=\"progressSubstep\">Analyzing waveform</div>
         </div>
     </main>
     <script>
         document.getElementById('mainForm').addEventListener('submit', function() {
+            document.getElementById('spinnerOverlay').style.display = 'flex';
+        });
+    </script>
+</body>
+</html>
+"""
+
+ANALYSIS_RESULT_HTML = """
+<!doctype html>
+<html lang=\"en\">
+<head>
+    <meta charset=\"utf-8\">
+    <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
+    <title>Flash-cut - Analysis Results</title>
+    <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css\">
+    <style>
+        body { padding-block: 1.5rem; background: #f8fafc; }
+        .centered { max-width: 480px; margin: 2rem auto; background: #fff; border-radius: 16px; box-shadow: 0 2px 16px #0001; padding: 2rem; }
+        .logo { display: block; margin: 0 auto 1.5rem; width: 64px; }
+        .form-group { margin-bottom: 1.5rem; }
+        .audio-info { background: #f1f5f9; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; }
+        .audio-info h4 { margin-top: 0; }
+        .step-indicator { display: flex; justify-content: center; margin-bottom: 2rem; }
+        .step { width: 2rem; height: 2rem; border-radius: 50%; background: #e2e8f0; color: #64748b; display: flex; align-items: center; justify-content: center; font-weight: bold; margin: 0 0.5rem; }
+        .step.active { background: #2563eb; color: white; }
+        .step.completed { background: #10b981; color: white; }
+        .waveform-img { width: 100%; height: auto; border-radius: 8px; margin: 1rem 0; }
+        .next-btn { display: block; width: 100%; font-size: 1.2rem; margin-top: 1.5rem; }
+    </style>
+</head>
+<body>
+    <main class=\"centered\">
+        <img src=\"https://cdn.jsdelivr.net/gh/tabler/tabler-icons/icons/chart-line.svg\" class=\"logo\" alt=\"logo\">
+        <h2 style=\"text-align:center;\">Audio Analysis</h2>
+        
+        <div class=\"step-indicator\">
+            <div class=\"step completed\">1</div>
+            <div class=\"step active\">2</div>
+            <div class=\"step\">3</div>
+        </div>
+        
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}<article>{% for m in messages %}<p>{{m}}</p>{% endfor %}</article>{% endif %}
+        {% endwith %}
+        
+        <div class=\"audio-info\">
+            <h4>Analysis Complete</h4>
+            <p><b>File:</b> {{ audio_filename }}</p>
+            <p><b>Duration:</b> {{ duration }} seconds</p>
+            <p><b>Segments found:</b> {{ num_segments }}</p>
+        </div>
+        
+        <h4>Waveform Preview</h4>
+        <img src=\"{{ url_for('download', job_id=job_id, filename='waveform.png') }}\" alt=\"Audio waveform\" class=\"waveform-img\">
+        
+        <a href=\"{{ url_for('upload_media_page', job_id=job_id) }}\" class=\"next-btn\" role=\"button\">Continue to Upload Media</a>
+    </main>
+</body>
+</html>
+"""
+
+UPLOAD_VISUAL_HTML = """
+<!doctype html>
+<html lang=\"en\">
+<head>
+    <meta charset=\"utf-8\">
+    <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
+    <title>Flash-cut - Upload Media</title>
+    <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css\">
+    <style>
+        body { padding-block: 1.5rem; background: #f8fafc; }
+        .centered { max-width: 480px; margin: 2rem auto; background: #fff; border-radius: 16px; box-shadow: 0 2px 16px #0001; padding: 2rem; }
+        .logo { display: block; margin: 0 auto 1.5rem; width: 64px; }
+        .form-group { margin-bottom: 1.5rem; }
+        .spinner-overlay { display: none; position: fixed; z-index: 9999; inset: 0; background: rgba(255,255,255,0.8); align-items: center; justify-content: center; flex-direction: column; }
+        .spinner { border: 6px solid #eee; border-top: 6px solid #2563eb; border-radius: 50%; width: 48px; height: 48px; animation: spin 1s linear infinite; margin-bottom: 1.5rem; }
+        .progress-msg { font-size: 1.2rem; font-weight: 500; color: #1e3a8a; text-align: center; max-width: 320px; }
+        .progress-substep { font-size: 0.9rem; color: #64748b; margin-top: 0.5rem; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .audio-info { background: #f1f5f9; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; }
+        .audio-info h4 { margin-top: 0; }
+        .step-indicator { display: flex; justify-content: center; margin-bottom: 2rem; }
+        .step { width: 2rem; height: 2rem; border-radius: 50%; background: #e2e8f0; color: #64748b; display: flex; align-items: center; justify-content: center; font-weight: bold; margin: 0 0.5rem; }
+        .step.active { background: #2563eb; color: white; }
+        .step.completed { background: #10b981; color: white; }
+        .media-preview { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; margin-top: 15px; }
+        .media-thumbnail { width: 100%; height: 100px; object-fit: cover; border-radius: 6px; }
+    </style>
+</head>
+<body>
+    <main class=\"centered\">
+        <img src=\"https://cdn.jsdelivr.net/gh/tabler/tabler-icons/icons/video.svg\" class=\"logo\" alt=\"logo\">
+        <h2 style=\"text-align:center;\">Upload Media</h2>
+        
+        <div class=\"step-indicator\">
+            <div class=\"step completed\">1</div>
+            <div class=\"step completed\">2</div>
+            <div class=\"step active\">3</div>
+        </div>
+        
+        <div class=\"audio-info\">
+            <h4>Audio Information</h4>
+            <p><b>File:</b> {{ audio_filename }}</p>
+            <p><b>Segments:</b> {{ num_segments }}</p>
+        </div>
+        
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}<article>{% for m in messages %}<p>{{m}}</p>{% endfor %}</article>{% endif %}
+        {% endwith %}
+        
+        <form id=\"visualForm\" action=\"{{ url_for('preview_media', job_id=job_id) }}\" method=\"post\" enctype=\"multipart/form-data\">
+            <div class=\"form-group\">
+                <label><b>Video Clips</b> (multiple allowed)</label>
+                <input type=\"file\" id=\"videos\" name=\"videos\" accept=\"video/*\" multiple>
+            </div>
+            <div class=\"form-group\">
+                <label><b>Or PNG Images</b> (multiple allowed)</label>
+                <input type=\"file\" id=\"images\" name=\"images\" accept=\"image/png\" multiple>
+            </div>
+            
+            <div class=\"form-group\">
+                <label><b>Aspect Ratio</b></label>
+                <select name=\"aspect_ratio\">
+                    <option value=\"16:9\" selected>16:9 (widescreen)</option>
+                    <option value=\"1:1\">1:1 (square)</option>
+                    <option value=\"9:16\">9:16 (vertical)</option>
+                    <option value=\"4:3\">4:3</option>
+                </select>
+            </div>
+            
+            <div id=\"mediaPreview\" class=\"media-preview\">
+                <!-- Thumbnails will appear here -->
+            </div>
+            
+            <button type=\"submit\" style=\"width:100%;font-size:1.2rem;margin-top:1.5rem;\">Preview Media</button>
+        </form>
+    </main>
+    <script>
+        // Function to handle image preview
+        function handleImagePreview(event, fileInput) {
+            const files = fileInput.files;
+            const preview = document.getElementById('mediaPreview');
+            
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                if (file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const img = document.createElement('img');
+                        img.src = e.target.result;
+                        img.className = 'media-thumbnail';
+                        preview.appendChild(img);
+                    }
+                    reader.readAsDataURL(file);
+                } else if (file.type.startsWith('video/')) {
+                    // For videos, create a video element and get a thumbnail
+                    const video = document.createElement('video');
+                    video.preload = 'metadata';
+                    video.onloadedmetadata = function() {
+                        // Create a canvas to capture a frame
+                        video.currentTime = 1; // Seek to 1 second
+                        video.onseeked = function() {
+                            const canvas = document.createElement('canvas');
+                            canvas.width = video.videoWidth;
+                            canvas.height = video.videoHeight;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                            
+                            const img = document.createElement('img');
+                            img.src = canvas.toDataURL();
+                            img.className = 'media-thumbnail';
+                            preview.appendChild(img);
+                        }
+                    }
+                    video.src = URL.createObjectURL(file);
+                }
+            }
+        }
+        
+        // Set up event listeners for both file inputs
+        document.getElementById('videos').addEventListener('change', function(event) {
+            handleImagePreview(event, this);
+        });
+        
+        document.getElementById('images').addEventListener('change', function(event) {
+            handleImagePreview(event, this);
+        });
+    </script>
+</body>
+</html>
+"""
+
+RENDER_OPTIONS_HTML = """
+<!doctype html>
+<html lang=\"en\">
+<head>
+    <meta charset=\"utf-8\">
+    <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
+    <title>Flash-cut - Rendering Options</title>
+    <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css\">
+    <style>
+        body { padding-block: 1.5rem; background: #f8fafc; }
+        .centered { max-width: 480px; margin: 2rem auto; background: #fff; border-radius: 16px; box-shadow: 0 2px 16px #0001; padding: 2rem; }
+        .logo { display: block; margin: 0 auto 1.5rem; width: 64px; }
+        .form-group { margin-bottom: 1.5rem; }
+        .spinner-overlay { display: none; position: fixed; z-index: 9999; inset: 0; background: rgba(255,255,255,0.8); align-items: center; justify-content: center; flex-direction: column; }
+        .spinner { border: 6px solid #eee; border-top: 6px solid #2563eb; border-radius: 50%; width: 48px; height: 48px; animation: spin 1s linear infinite; margin-bottom: 1.5rem; }
+        .progress-msg { font-size: 1.2rem; font-weight: 500; color: #1e3a8a; text-align: center; max-width: 320px; }
+        .progress-substep { font-size: 0.9rem; color: #64748b; margin-top: 0.5rem; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .audio-info { background: #f1f5f9; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; }
+        .audio-info h4 { margin-top: 0; }
+        .step-indicator { display: flex; justify-content: center; margin-bottom: 2rem; }
+        .step { width: 2rem; height: 2rem; border-radius: 50%; background: #e2e8f0; color: #64748b; display: flex; align-items: center; justify-content: center; font-weight: bold; margin: 0 0.5rem; }
+        .step.active { background: #2563eb; color: white; }
+        .step.completed { background: #10b981; color: white; }
+        .media-preview { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; margin: 15px 0; }
+        .media-thumbnail { width: 100%; height: 100px; object-fit: cover; border-radius: 6px; }
+        .progress-container { width: 100%; height: 24px; background: #e2e8f0; border-radius: 12px; overflow: hidden; margin-bottom: 1rem; }
+        .progress-bar { height: 100%; width: 0%; background: #2563eb; transition: width 0.5s; }
+    </style>
+</head>
+<body>
+    <main class=\"centered\">
+        <img src=\"https://cdn.jsdelivr.net/gh/tabler/tabler-icons/icons/player-play.svg\" class=\"logo\" alt=\"logo\">
+        <h2 style=\"text-align:center;\">Ready to Render</h2>
+        
+        <div class=\"step-indicator\">
+            <div class=\"step completed\">1</div>
+            <div class=\"step completed\">2</div>
+            <div class=\"step completed\">3</div>
+        </div>
+        
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}<article>{% for m in messages %}<p>{{m}}</p>{% endfor %}</article>{% endif %}
+        {% endwith %}
+        
+        <div class=\"audio-info\">
+            <h4>Media Ready</h4>
+            <p><b>Audio:</b> {{ audio_filename }}</p>
+            <p><b>Segments:</b> {{ num_segments }}</p>
+            <p><b>Aspect Ratio:</b> {{ aspect_ratio }}</p>
+            <p><b>Media files:</b> {{ media_files|length }}</p>
+        </div>
+        
+        <h4>Media Preview</h4>
+        <div class=\"media-preview\">
+            {% for file in media_files %}
+                {% if file.type == 'image' %}
+                    <img src=\"{{ url_for('download', job_id=job_id, filename=file.filename) }}\" alt=\"Image\" class=\"media-thumbnail\">
+                {% else %}
+                    <div class=\"media-thumbnail\" style=\"display: flex; justify-content: center; align-items: center; background: #000;\">
+                        <span style=\"font-size: 24px; color: #fff;\">▶️</span>
+                    </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+        
+        <form id=\"renderForm\" action=\"{{ url_for('render_video', job_id=job_id) }}\" method=\"post\" enctype=\"multipart/form-data\">
+            <div class=\"form-group\">
+                <label><b>Clip Portion</b></label>
+                <select name=\"clip_mode\">
+                    <option value=\"head\" selected>Head (start)</option>
+                    <option value=\"tail\">Tail (end)</option>
+                </select>
+            </div>
+            <div class=\"form-group\">
+                <label><b>Output File Name</b></label>
+                <input type=\"text\" name=\"output_name\" value=\"final_video.mp4\">
+            </div>
+            <button type=\"submit\" style=\"width:100%;font-size:1.2rem;margin-top:1rem;\">Render Final Video</button>
+        </form>
+        
+        <div class=\"spinner-overlay\" id=\"spinnerOverlay\">
+            <div class=\"spinner\"></div>
+            <div class=\"progress-msg\" id=\"progressMsg\">Rendering video...</div>
+            <div class=\"progress-substep\" id=\"progressSubstep\">Processing clips</div>
+            <div class=\"progress-container\">
+                <div class=\"progress-bar\" id=\"progressBar\"></div>
+            </div>
+        </div>
+    </main>
+    <script>
+        document.getElementById('renderForm').addEventListener('submit', function() {
             // Show spinner overlay
             document.getElementById('spinnerOverlay').style.display = 'flex';
             
             // Simulate progress updates
             const progressMsg = document.getElementById('progressMsg');
             const progressSubstep = document.getElementById('progressSubstep');
+            const progressBar = document.getElementById('progressBar');
+            
             const steps = [
-                {msg: 'Processing audio file...', sub: 'Analyzing waveform', delay: 800},
-                {msg: 'Detecting onsets...', sub: 'Finding beats and segments', delay: 1500},
-                {msg: 'Creating segments...', sub: 'Mapping beats to time segments', delay: 1200},
-                {msg: 'Generating flash cuts...', sub: 'Calculating optimal cuts', delay: 1500},
-                {msg: 'Rendering media...', sub: 'Processing video clips', delay: 2000},
-                {msg: 'Finalizing output...', sub: 'Muxing audio and video', delay: 1500},
+                {msg: 'Preparing media files...', sub: 'Processing uploaded content', delay: 1000, progress: 10},
+                {msg: 'Rendering segments...', sub: 'Creating video clips', delay: 2000, progress: 30},
+                {msg: 'Assembling video...', sub: 'Combining segments', delay: 1500, progress: 60},
+                {msg: 'Finalizing output...', sub: 'Muxing audio and video', delay: 1500, progress: 90},
             ];
             
             let stepIndex = 0;
@@ -142,8 +372,13 @@ INDEX_HTML = """
                 if (stepIndex < steps.length) {
                     progressMsg.textContent = steps[stepIndex].msg;
                     progressSubstep.textContent = steps[stepIndex].sub;
+                    progressBar.style.width = steps[stepIndex].progress + '%';
+                    
                     stepIndex++;
                     setTimeout(updateProgress, steps[stepIndex-1].delay);
+                } else {
+                    // Final state
+                    progressBar.style.width = '100%';
                 }
             }
             
@@ -161,7 +396,7 @@ RESULT_HTML = """
 <head>
     <meta charset=\"utf-8\">
     <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
-    <title>Flash-cut Result</title>
+    <title>Flash-cut Complete</title>
     <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css\">
     <style>
         body { background: #f8fafc; }
@@ -170,27 +405,88 @@ RESULT_HTML = """
         .video-embed { width: 100%; max-width: 480px; aspect-ratio: 16/9; margin: 1.5rem auto; display: block; border-radius: 12px; box-shadow: 0 2px 8px #0002; }
         .summary-list { list-style: none; padding: 0; margin: 0 0 1.5rem 0; }
         .summary-list li { margin-bottom: 0.5rem; }
+        .download-btn { display: block; text-align: center; margin-top: 1.5rem; text-decoration: none; }
+        .step-indicator { display: flex; justify-content: center; margin-bottom: 2rem; }
+        .step { width: 2rem; height: 2rem; border-radius: 50%; background: #e2e8f0; color: #64748b; display: flex; align-items: center; justify-content: center; font-weight: bold; margin: 0 0.5rem; }
+        .step.completed { background: #10b981; color: white; }
+        .confetti { position: fixed; z-index: -1; }
     </style>
 </head>
 <body>
     <main class=\"centered\">
-        <h2 style=\"text-align:center;\">Flash-cut Result</h2>
+        <h2 style=\"text-align:center;\">Video Complete! 🎉</h2>
+        
+        <div class=\"step-indicator\">
+            <div class=\"step completed\">1</div>
+            <div class=\"step completed\">2</div>
+            <div class=\"step completed\">3</div>
+        </div>
+        
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}<article>{% for m in messages %}<p>{{m}}</p>{% endfor %}</article>{% endif %}
+        {% endwith %}
+        
         <ul class=\"summary-list\">
-            <li><b>Onsets:</b> {{ num_onsets }}</li>
-            <li><b>Segments:</b> {{ num_segments }}</li>
-            <li><b>Flash cuts:</b> {{ num_flash }} ({{ flash_start }}–{{ flash_end }} s)</li>
-            <li><b>FPS:</b> {{ fps }}</li>
+            <li><b>Segments created:</b> {{ num_segments }}</li>
+            <li><b>Video FPS:</b> {{ fps }}</li>
         </ul>
+        
         {% if rendered %}
             <video class=\"video-embed\" controls>
                 <source src=\"{{ url_for('download', job_id=job_id, filename=output_name) }}\" type=\"video/mp4\">
                 Your browser does not support the video tag.
             </video>
+            <a href=\"{{ url_for('download', job_id=job_id, filename=output_name) }}\" class=\"download-btn\" download>Download Video</a>
+            <a href=\"{{ url_for('download', job_id=job_id, filename='cuts.csv') }}\" class=\"download-btn\" download>Download Segments CSV</a>
         {% else %}
-            <p style=\"color:#f00;text-align:center;\">Video rendering failed or not available.</p>
+            <p style=\"color:#f00;text-align:center;\">Video rendering failed. Please try again with different visual content.</p>
         {% endif %}
-        <p style=\"text-align:center;\"><a href=\"{{ url_for('index') }}\">← New analysis</a></p>
+        
+        <p style=\"text-align:center;margin-top:2rem;\"><a href=\"{{ url_for('index') }}\">← Create a new video</a></p>
     </main>
+    
+    <script>
+        // Simple confetti effect for completion
+        function createConfetti() {
+            const colors = ['#f94144', '#f3722c', '#f8961e', '#f9c74f', '#90be6d', '#43aa8b', '#577590'];
+            const confettiCount = 150;
+            
+            for (let i = 0; i < confettiCount; i++) {
+                const confetti = document.createElement('div');
+                confetti.className = 'confetti';
+                confetti.style.left = Math.random() * 100 + 'vw';
+                confetti.style.top = -20 + 'px';
+                confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                confetti.style.width = Math.random() * 10 + 5 + 'px';
+                confetti.style.height = Math.random() * 10 + 5 + 'px';
+                confetti.style.opacity = Math.random() + 0.5;
+                confetti.style.transform = 'rotate(' + Math.random() * 360 + 'deg)';
+                
+                document.body.appendChild(confetti);
+                
+                const fallDuration = Math.random() * 3 + 2;
+                const swayDuration = Math.random() * 2 + 2;
+                
+                confetti.animate([
+                    { transform: `translate3d(0, 0, 0) rotate(0deg)`, opacity: 1 },
+                    { transform: `translate3d(${(Math.random() - 0.5) * 200}px, ${window.innerHeight}px, 0) rotate(${Math.random() * 360}deg)`, opacity: 0 }
+                ], {
+                    duration: fallDuration * 1000,
+                    easing: 'cubic-bezier(0.4, 0.0, 0.2, 1)',
+                    fill: 'forwards'
+                });
+                
+                setTimeout(() => {
+                    confetti.remove();
+                }, fallDuration * 1000);
+            }
+        }
+        
+        // Only run confetti if the video rendered successfully
+        {% if rendered %}
+        window.addEventListener('load', createConfetti);
+        {% endif %}
+    </script>
 </body>
 </html>
 """
@@ -484,109 +780,208 @@ def render_from_videos(videos: List[str], starts: List[float], ends: List[float]
 def index():
     return render_template_string(INDEX_HTML)
 
-@app.route("/analyze", methods=["POST"])
-def analyze():
+@app.route("/upload-audio", methods=["POST"])
+def upload_audio():
     audio_file = request.files.get("audio")
     if not audio_file or audio_file.filename == "":
         flash("Please upload an audio file.")
         return redirect(url_for("index"))
 
-    fps = float(request.form.get("fps", 30))
-    threshold = float(request.form.get("threshold", 0.30))
-    max_gap = float(request.form.get("max_gap", 5.0))
-    flash_start = float(request.form.get("flash_start", 10.0))
-    flash_end = float(request.form.get("flash_end", 25.0))
-    flash_gap = float(request.form.get("flash_gap", 0.12))
-    do_render = request.form.get("do_render") == "1"
-    clip_mode = (request.form.get("clip_mode", "head") or "head").lower()
-    if clip_mode not in {"head", "tail"}:
-        clip_mode = "head"
-    output_name = (request.form.get("output_name", "final_video.mp4") or "final_video.mp4").strip()
-    aspect_ratio = request.form.get("aspect_ratio", "16:9")
+    # Fixed values for simplified UX
+    fps = 30  # Default fixed at 30 FPS
+    threshold = 0.30
+    max_gap = 5.0
+    flash_start = 10.0
+    flash_end = 25.0
+    flash_gap = 0.12
 
+    # Create job directory
     job_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     job_dir = JOBS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
+    # Save audio file
     audio_path = job_dir / audio_file.filename
     audio_file.save(str(audio_path))
 
     try:
+        # Analyze audio
         events, duration, sr, y = detect_beats(str(audio_path), threshold=threshold)
+        starts, ends = compute_intervals(events, duration, fps, max_gap)
+
+        # Add flash times if needed
+        flash_times = detect_flash_window(y, sr, (flash_start, flash_end), flash_gap, fps, threshold) if flash_end > flash_start else []
+        if flash_times:
+            starts, ends = inject_flash_splits(starts, ends, flash_times, fps)
+
+        # Save data
+        data = {
+            "audio": audio_file.filename,
+            "fps": fps,
+            "max_gap": max_gap,
+            "events_onsets": events,
+            "segments": [{"start": s, "end": e} for s, e in zip(starts, ends)],
+            "flash": flash_times,
+            "flash_window": [flash_start, flash_end]
+        }
+        (job_dir / "cuts.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+        
+        # Create CSV file for download
+        (job_dir / "cuts.csv").write_text(
+            "index,start,end\n" + "\n".join(f"{i+1},{s:.3f},{e:.3f}" for i, (s, e) in enumerate(zip(starts, ends))),
+            encoding="utf-8",
+        )
+        
+        # Create waveform visualization
+        plot_waveform(job_dir / "waveform.png", y, sr, flash_times, (flash_start, flash_end))
+        
+        # Redirect to analysis results page
+        return render_template_string(
+            ANALYSIS_RESULT_HTML,
+            job_id=job_id,
+            audio_filename=audio_file.filename,
+            duration=round(duration, 1),
+            num_segments=len(starts)
+        )
     except Exception as e:
-        flash("Failed to read audio. If you uploaded MP3, enable FFmpeg on Railway or upload a WAV/FLAC/OGG file.\n" + str(e))
+        flash(f"Failed to analyze audio: {str(e)}")
         return redirect(url_for("index"))
-    starts, ends = compute_intervals(events, duration, fps, max_gap)
 
-    flash_times = detect_flash_window(y, sr, (flash_start, flash_end), flash_gap, fps, threshold) if flash_end > flash_start else []
-    if flash_times:
-        # If we later remove flash window UI, leave this here behind a feature flag
-        starts, ends = inject_flash_splits(starts, ends, flash_times, fps)
-
-    data = {
-        "audio": audio_file.filename,
-        "fps": fps,
-        "max_gap": max_gap,
-        "events_onsets": events,
-        "segments": [{"start": s, "end": e} for s, e in zip(starts, ends)],
-        "flash": flash_times,
-        "flash_window": [flash_start, flash_end],
-        "clip_mode": clip_mode,
-    }
-    (job_dir / "cuts.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-    (job_dir / "cuts.csv").write_text(
-        "index,start,end\n" + "\n".join(f"{i+1},{s:.3f},{e:.3f}" for i, (s, e) in enumerate(zip(starts, ends))),
-        encoding="utf-8",
+@app.route("/upload-media/<job_id>", methods=["GET"])
+def upload_media_page(job_id):
+    job_dir = JOBS_DIR / job_id
+    
+    if not job_dir.exists() or not (job_dir / "cuts.json").exists():
+        flash("Invalid job ID or session expired.")
+        return redirect(url_for("index"))
+    
+    # Load the saved data
+    data = json.loads((job_dir / "cuts.json").read_text(encoding="utf-8"))
+    audio_filename = data["audio"]
+    num_segments = len(data["segments"])
+    
+    return render_template_string(
+        UPLOAD_VISUAL_HTML,
+        job_id=job_id,
+        audio_filename=audio_filename,
+        num_segments=num_segments
     )
 
-    plot_waveform(job_dir / "waveform.png", y, sr, flash_times, (flash_start, flash_end))
+@app.route("/preview-media/<job_id>", methods=["POST"])
+def preview_media(job_id):
+    job_dir = JOBS_DIR / job_id
+    
+    if not job_dir.exists() or not (job_dir / "cuts.json").exists():
+        flash("Invalid job ID or session expired.")
+        return redirect(url_for("index"))
+    
+    # Load the saved data
+    data = json.loads((job_dir / "cuts.json").read_text(encoding="utf-8"))
+    audio_filename = data["audio"]
+    num_segments = len(data["segments"])
+    
+    # Get aspect ratio from form
+    aspect_ratio = request.form.get("aspect_ratio", "16:9")
+    
+    # Save uploaded media temporarily
+    media_files = []
+    
+    # Process videos
+    for f in request.files.getlist("videos"):
+        if f and f.filename:
+            dst = job_dir / f.filename
+            f.save(str(dst))
+            media_files.append({"type": "video", "filename": f.filename})
+    
+    # Process images
+    for f in request.files.getlist("images"):
+        if f and f.filename.lower().endswith(".png"):
+            dst = job_dir / f.filename
+            f.save(str(dst))
+            media_files.append({"type": "image", "filename": f.filename})
+    
+    if not media_files:
+        flash("Please upload at least one video clip or PNG image.")
+        return redirect(url_for("upload_media_page", job_id=job_id))
+    
+    # Save media info and aspect ratio to job
+    data["media_files"] = media_files
+    data["aspect_ratio"] = aspect_ratio
+    (job_dir / "cuts.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+    
+    return render_template_string(
+        RENDER_OPTIONS_HTML,
+        job_id=job_id,
+        audio_filename=audio_filename,
+        num_segments=num_segments,
+        aspect_ratio=aspect_ratio,
+        media_files=media_files
+    )
 
+@app.route("/render/<job_id>", methods=["POST"])
+def render_video(job_id):
+    job_dir = JOBS_DIR / job_id
+    
+    if not job_dir.exists() or not (job_dir / "cuts.json").exists():
+        flash("Invalid job ID or session expired.")
+        return redirect(url_for("index"))
+    
+    # Load the saved data
+    data = json.loads((job_dir / "cuts.json").read_text(encoding="utf-8"))
+    audio_filename = data["audio"]
+    audio_path = job_dir / audio_filename
+    fps = data.get("fps", 30)
+    starts = [s["start"] for s in data["segments"]]
+    ends = [s["end"] for s in data["segments"]]
+    aspect_ratio = data.get("aspect_ratio", "16:9")
+    
+    # Get form data
+    clip_mode = (request.form.get("clip_mode", "head") or "head").lower()
+    if clip_mode not in {"head", "tail"}:
+        clip_mode = "head"
+    output_name = (request.form.get("output_name", "final_video.mp4") or "final_video.mp4").strip()
+    
+    # Process saved media files
     rendered = False
-    # Always render video (default checked)
-    do_render = True
-    if do_render:
-        saved_videos: List[str] = []
-        for f in request.files.getlist("videos"):
-            if f and f.filename:
-                dst = job_dir / f.filename
-                f.save(str(dst))
-                saved_videos.append(str(dst))
-
-        if saved_videos:
+    
+    # Check for videos
+    media_files = data.get("media_files", [])
+    saved_videos = [str(job_dir / item["filename"]) for item in media_files if item["type"] == "video"]
+    
+    if saved_videos:
+        out_path = job_dir / output_name
+        try:
+            render_from_videos(saved_videos, starts, ends, str(audio_path), fps, str(out_path), clip_mode=clip_mode, aspect_ratio=aspect_ratio)
+            rendered = True
+        except Exception as e:
+            flash(f"FFmpeg video render failed: {str(e)}")
+    else:
+        # Try PNG fallback
+        pngs = [str(job_dir / item["filename"]) for item in media_files if item["type"] == "image"]
+        
+        if pngs:
             out_path = job_dir / output_name
             try:
-                render_from_videos(saved_videos, starts, ends, str(audio_path), fps, str(out_path), clip_mode=clip_mode, aspect_ratio=aspect_ratio)
+                render_from_images(pngs, starts, ends, str(audio_path), fps, str(out_path), aspect_ratio=aspect_ratio)
                 rendered = True
             except Exception as e:
-                flash(f"ffmpeg video render failed:\n{e}")
+                flash(f"FFmpeg image render failed: {str(e)}")
         else:
-            # PNG fallback
-            images = request.files.getlist("images")
-            pngs: List[str] = []
-            for f in images:
-                if f and f.filename.lower().endswith(".png"):
-                    dst = job_dir / f.filename
-                    f.save(str(dst))
-                    pngs.append(str(dst))
-            if pngs:
-                out_path = job_dir / output_name
-                try:
-                    render_from_images(pngs, starts, ends, str(audio_path), fps, str(out_path), aspect_ratio=aspect_ratio)
-                    rendered = True
-                except Exception as e:
-                    flash(f"ffmpeg image render failed:\n{e}")
-            else:
-                flash("No videos or PNGs were provided for rendering.")
+            flash("No videos or PNGs were provided for rendering.")
+            return redirect(url_for("upload_media_page", job_id=job_id))
 
-    # No CSV, PNG, or JSON links, no waveform or segments preview
+    # Show the final result
     return render_template_string(
         RESULT_HTML,
         job_id=job_id,
-        fps=fps, threshold=threshold, max_gap=max_gap,
-        flash_start=flash_start, flash_end=flash_end,
-        num_onsets=len(events), num_segments=len(starts), num_flash=len(flash_times),
-        rendered=rendered, output_name=output_name
+        fps=fps,
+        num_onsets=len(data["events_onsets"]),
+        num_segments=len(starts),
+        num_flash=len(data.get("flash", [])),
+        flash_start=data.get("flash_window", [0, 0])[0],
+        flash_end=data.get("flash_window", [0, 0])[1],
+        rendered=rendered,
+        output_name=output_name
     )
 
 @app.route("/jobs/<job_id>/<path:filename>")
