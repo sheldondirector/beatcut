@@ -199,21 +199,70 @@ app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024  # 500 MB cap
 # ---------------- helpers ----------------
 
 def _ffmpeg_bin() -> str:
-    return os.environ.get("FFMPEG") or shutil.which("ffmpeg") or "ffmpeg"
+    # Try multiple common locations for FFmpeg
+    ffmpeg_paths = [
+        os.environ.get("FFMPEG"),
+        shutil.which("ffmpeg"),
+        "/usr/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+        "/opt/ffmpeg/bin/ffmpeg",
+        "ffmpeg"
+    ]
+    
+    # Filter out None values and return the first valid path
+    for path in ffmpeg_paths:
+        if path and (os.path.exists(path) or shutil.which(path)):
+            return path
+    
+    # Default fallback
+    return "ffmpeg"
 
 def _ffprobe_bin() -> str:
-    return os.environ.get("FFPROBE") or shutil.which("ffprobe") or "ffprobe"
+    # Try multiple common locations for FFprobe
+    ffprobe_paths = [
+        os.environ.get("FFPROBE"),
+        shutil.which("ffprobe"),
+        "/usr/bin/ffprobe",
+        "/usr/local/bin/ffprobe",
+        "/opt/ffmpeg/bin/ffprobe",
+        "ffprobe"
+    ]
+    
+    # Filter out None values and return the first valid path
+    for path in ffprobe_paths:
+        if path and (os.path.exists(path) or shutil.which(path)):
+            return path
+    
+    # Default fallback
+    return "ffprobe"
 
 def run_cmd(cmd: List[str], cwd: str | Path | None = None):
     """Run a subprocess and raise with captured logs on failure (friendlier Flask flash)."""
-    proc = subprocess.run(cmd, cwd=str(cwd) if cwd else None, text=True, capture_output=True)
-    if proc.returncode != 0:
-        raise RuntimeError(
-            "FFmpeg failed (exit %s)\nCMD: %s\n--- STDOUT ---\n%s\n--- STDERR ---\n%s" % (
-                proc.returncode, " ".join(cmd), proc.stdout or "", proc.stderr or ""
+    try:
+        # Print the command being executed for debugging
+        print(f"Executing command: {' '.join(cmd)}")
+        
+        # Add PATH environment variable to help find executables
+        env = os.environ.copy()
+        extra_paths = ["/usr/local/bin", "/opt/ffmpeg/bin"]
+        env["PATH"] = os.pathsep.join(extra_paths + [env.get("PATH", "")])
+        
+        proc = subprocess.run(cmd, cwd=str(cwd) if cwd else None, text=True, capture_output=True, env=env)
+        
+        if proc.returncode != 0:
+            error_msg = (
+                f"Command failed (exit {proc.returncode})\n"
+                f"CMD: {' '.join(cmd)}\n"
+                f"--- STDOUT ---\n{proc.stdout or ''}\n"
+                f"--- STDERR ---\n{proc.stderr or ''}"
             )
-        )
-    return proc
+            print(error_msg)  # Log to console/logs
+            raise RuntimeError(error_msg)
+        return proc
+    except FileNotFoundError as e:
+        error_msg = f"Command not found: {cmd[0]}\nMake sure FFmpeg is installed and in PATH.\nError: {str(e)}"
+        print(error_msg)  # Log to console/logs
+        raise RuntimeError(error_msg)
 
 # ---------------- signal processing ----------------
 
@@ -596,10 +645,63 @@ def plot_waveform(png_path: Path, y: np.ndarray, sr: int, flash_times: List[floa
 def health():
     return {"ok": True}
 
+@app.route("/ffmpeg-check")
+def ffmpeg_check():
+    """Diagnostic endpoint to check FFmpeg availability and version."""
+    ffmpeg = _ffmpeg_bin()
+    ffprobe = _ffprobe_bin()
+    
+    results = {
+        "ffmpeg_path": ffmpeg,
+        "ffprobe_path": ffprobe,
+        "environment": dict(os.environ),
+        "path": os.environ.get("PATH", ""),
+        "cwd": os.getcwd(),
+        "timestamp": datetime.now().isoformat()
+    }
+    
+    # Try to get versions
+    try:
+        proc = subprocess.run([ffmpeg, "-version"], text=True, capture_output=True)
+        results["ffmpeg_version"] = proc.stdout.strip() if proc.returncode == 0 else "Error running ffmpeg"
+        results["ffmpeg_available"] = proc.returncode == 0
+    except Exception as e:
+        results["ffmpeg_error"] = str(e)
+        results["ffmpeg_available"] = False
+    
+    try:
+        proc = subprocess.run([ffprobe, "-version"], text=True, capture_output=True)
+        results["ffprobe_version"] = proc.stdout.strip() if proc.returncode == 0 else "Error running ffprobe"
+        results["ffprobe_available"] = proc.returncode == 0
+    except Exception as e:
+        results["ffprobe_error"] = str(e)
+        results["ffprobe_available"] = False
+    
+    return results
+
 if __name__ == "__main__":
     import os
     import matplotlib
     matplotlib.use("Agg")  # headless on Railway
+    
+    # Print diagnostic info at startup
+    ffmpeg = _ffmpeg_bin()
+    ffprobe = _ffprobe_bin()
+    print(f"Using FFmpeg: {ffmpeg}")
+    print(f"Using FFprobe: {ffprobe}")
+    print(f"Current PATH: {os.environ.get('PATH', '')}")
+    
+    try:
+        # Test FFmpeg at startup
+        proc = subprocess.run([ffmpeg, "-version"], text=True, capture_output=True)
+        if proc.returncode == 0:
+            print(f"FFmpeg version: {proc.stdout.splitlines()[0] if proc.stdout else 'Unknown'}")
+        else:
+            print(f"FFmpeg test failed with exit code {proc.returncode}")
+            print(f"Error: {proc.stderr}")
+    except Exception as e:
+        print(f"Failed to run FFmpeg: {str(e)}")
+    
     port = int(os.environ.get("PORT", "8080"))
     app.run(host="0.0.0.0", port=port)
 
