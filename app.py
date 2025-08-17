@@ -27,11 +27,140 @@ JOBS_DIR = BASE_DIR / "jobs"
 JOBS_DIR.mkdir(exist_ok=True)
 
 INDEX_HTML = """
-<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Flash-cut Builder</title><link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css\"><style>body{padding-block:1rem}.grid{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.wave{max-width:100%;border-radius:12px;border:1px solid #ddd;background:#fff}</style></head><body><main class=\"container\"><h2>Flash-cut Builder</h2>{% with messages = get_flashed_messages() %}{% if messages %}<article>{% for m in messages %}<p>{{m}}</p>{% endfor %}</article>{% endif %}{% endwith %}<form action=\"{{ url_for('analyze') }}\" method=\"post\" enctype=\"multipart/form-data\"><fieldset><legend>Audio</legend><input type=\"file\" name=\"audio\" accept=\".mp3,.wav,.flac,.ogg,.m4a,audio/*\" required></fieldset><div class=\"grid\"><fieldset><legend>Analysis</legend><label>FPS <input type=\"number\" name=\"fps\" step=\"1\" min=\"10\" max=\"120\" value=\"30\"></label><label>Onset threshold <input type=\"number\" name=\"threshold\" step=\"0.01\" min=\"0\" max=\"1\" value=\"0.30\"></label><label>Max gap (s) <input type=\"number\" name=\"max_gap\" step=\"0.05\" min=\"0.1\" max=\"10\" value=\"5.0\"></label></fieldset><fieldset><legend>Flash window</legend><label>Start (s) <input type=\"number\" name=\"flash_start\" step=\"0.1\" value=\"10\"></label><label>End (s) <input type=\"number\" name=\"flash_end\" step=\"0.1\" value=\"25\"></label><label>Min flash gap (s) <input type=\"number\" name=\"flash_gap\" step=\"0.01\" value=\"0.12\"></label></fieldset><fieldset><legend>Render (optional)</legend><label><input type=\"checkbox\" name=\"do_render\" value=\"1\"> Render video with ffmpeg</label><label>Video clips (multiple) <input type=\"file\" name=\"videos\" accept=\"video/*\" multiple></label><label>PNG images (multiple) <input type=\"file\" name=\"images\" accept=\"image/png\" multiple></label><label>Clip portion <select name=\"clip_mode\"><option value=\"head\" selected>Head (start)</option><option value=\"tail\">Tail (end)</option></select></label><label>Output file name <input type=\"text\" name=\"output_name\" value=\"final_video.mp4\"></label></fieldset></div><button type=\"submit\">Analyze</button></form></main></body></html>
+<!doctype html>
+<html lang=\"en\">
+<head>
+    <meta charset=\"utf-8\">
+    <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
+    <title>Flash-cut Builder</title>
+    <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css\">
+    <style>
+        body { padding-block: 1.5rem; background: #f8fafc; }
+        .centered { max-width: 480px; margin: 2rem auto; background: #fff; border-radius: 16px; box-shadow: 0 2px 16px #0001; padding: 2rem; }
+        .logo { display: block; margin: 0 auto 1.5rem; width: 64px; }
+        .form-group { margin-bottom: 1.5rem; }
+        .advanced { display: none; margin-top: 1.5rem; }
+        .show-advanced .advanced { display: block; }
+        .toggle-adv { color: #2563eb; background: none; border: none; cursor: pointer; font-size: 1rem; margin-bottom: 1rem; }
+        .spinner-overlay { display: none; position: fixed; z-index: 9999; inset: 0; background: rgba(255,255,255,0.7); align-items: center; justify-content: center; }
+        .spinner { border: 6px solid #eee; border-top: 6px solid #2563eb; border-radius: 50%; width: 48px; height: 48px; animation: spin 1s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <main class=\"centered\">
+        <img src=\"https://cdn.jsdelivr.net/gh/tabler/tabler-icons/icons/music.svg\" class=\"logo\" alt=\"logo\">
+        <h2 style=\"text-align:center;\">Flash-cut Builder</h2>
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}<article>{% for m in messages %}<p>{{m}}</p>{% endfor %}</article>{% endif %}
+        {% endwith %}
+        <form id=\"mainForm\" action=\"{{ url_for('analyze') }}\" method=\"post\" enctype=\"multipart/form-data\">
+            <div class=\"form-group\">
+                <label for=\"audio\"><b>Audio File</b></label>
+                <input type=\"file\" id=\"audio\" name=\"audio\" accept=\".mp3,.wav,.flac,.ogg,.m4a,audio/*\" required>
+            </div>
+            <div class=\"form-group\">
+                <label for=\"fps\"><b>Frames per Second (FPS)</b></label>
+                <input type=\"number\" id=\"fps\" name=\"fps\" step=\"1\" min=\"10\" max=\"120\" value=\"30\" required>
+            </div>
+            <button type=\"button\" class=\"toggle-adv\" onclick=\"document.body.classList.toggle('show-advanced')\">Show advanced options</button>
+            <div class=\"advanced\">
+                <div class=\"form-group\">
+                    <label>Aspect Ratio</label>
+                    <select name=\"aspect_ratio\">
+                        <option value=\"16:9\" selected>16:9 (widescreen)</option>
+                        <option value=\"1:1\">1:1 (square)</option>
+                        <option value=\"9:16\">9:16 (vertical)</option>
+                        <option value=\"4:3\">4:3</option>
+                    </select>
+                </div>
+                <div class=\"form-group\">
+                    <label for=\"threshold\">Onset threshold</label>
+                    <input type=\"number\" id=\"threshold\" name=\"threshold\" step=\"0.01\" min=\"0\" max=\"1\" value=\"0.30\">
+                </div>
+                <div class=\"form-group\">
+                    <label for=\"max_gap\">Max gap (s)</label>
+                    <input type=\"number\" id=\"max_gap\" name=\"max_gap\" step=\"0.05\" min=\"0.1\" max=\"10\" value=\"5.0\">
+                </div>
+                <div class=\"form-group\">
+                    <label>Flash window</label>
+                    <div style=\"display:flex;gap:0.5rem;\">
+                        <input type=\"number\" name=\"flash_start\" step=\"0.1\" value=\"10\" placeholder=\"Start (s)\">
+                        <input type=\"number\" name=\"flash_end\" step=\"0.1\" value=\"25\" placeholder=\"End (s)\">
+                        <input type=\"number\" name=\"flash_gap\" step=\"0.01\" value=\"0.12\" placeholder=\"Min gap (s)\">
+                    </div>
+                </div>
+                <div class=\"form-group\">
+                    <label><input type=\"checkbox\" name=\"do_render\" value=\"1\" checked> Render video with ffmpeg</label>
+                </div>
+                <div class=\"form-group\">
+                    <label>Video clips (multiple)</label>
+                    <input type=\"file\" name=\"videos\" accept=\"video/*\" multiple>
+                </div>
+                <div class=\"form-group\">
+                    <label>PNG images (multiple)</label>
+                    <input type=\"file\" name=\"images\" accept=\"image/png\" multiple>
+                </div>
+                <div class=\"form-group\">
+                    <label>Clip portion</label>
+                    <select name=\"clip_mode\"><option value=\"head\" selected>Head (start)</option><option value=\"tail\">Tail (end)</option></select>
+                </div>
+                <div class=\"form-group\">
+                    <label>Output file name</label>
+                    <input type=\"text\" name=\"output_name\" value=\"final_video.mp4\">
+                </div>
+            </div>
+            <button type=\"submit\" style=\"width:100%;font-size:1.2rem;margin-top:1.5rem;\">Analyze</button>
+        </form>
+        <div class=\"spinner-overlay\" id=\"spinnerOverlay\"><div class=\"spinner\"></div></div>
+    </main>
+    <script>
+        document.getElementById('mainForm').addEventListener('submit', function() {
+            document.getElementById('spinnerOverlay').style.display = 'flex';
+        });
+    </script>
+</body>
+</html>
 """
 
 RESULT_HTML = """
-<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Flash-cut Result</title><link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css\"><style>.grid{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.box{border:1px solid #ddd;border-radius:12px;padding:1rem;background:#fff}img.wave{max-width:100%;border-radius:12px;border:1px solid #ddd;background:#fff;max-height:320px;object-fit:cover}</style></head><body><main class=\"container\"><h2>Flash-cut Result</h2><p class=\"mono\">Job: {{ job_id }}</p><div class=\"grid\"><section class=\"box\"><h4>Summary</h4><ul><li>Onsets: <strong>{{ num_onsets }}</strong></li><li>Segments: <strong>{{ num_segments }}</strong></li><li>Flash cuts: <strong>{{ num_flash }}</strong> ({{ flash_start }}–{{ flash_end }} s)</li><li>FPS: {{ fps }}, Threshold: {{ threshold }}, Max gap: {{ max_gap }}</li></ul><div><a href=\"{{ url_for('download', job_id=job_id, filename='cuts.json') }}\">Download cuts.json</a> • <a href=\"{{ url_for('download', job_id=job_id, filename='cuts.csv') }}\">Download cuts.csv</a> • <a href=\"{{ url_for('download', job_id=job_id, filename='waveform.png') }}\">Download waveform.png</a>{% if rendered %} • <a href=\"{{ url_for('download', job_id=job_id, filename=output_name) }}\">Download {{ output_name }}</a>{% endif %}</div></section><section class=\"box\"><h4>Waveform</h4><img class=\"wave\" src=\"{{ url_for('download', job_id=job_id, filename='waveform.png') }}\" alt=\"waveform\"></section></div><details><summary>Segments (first 100)</summary><pre class=\"mono\" style=\"white-space:pre-wrap\">{{ segments_preview }}</pre></details><p><a href=\"{{ url_for('index') }}\">← New analysis</a></p></main></body></html>
+<!doctype html>
+<html lang=\"en\">
+<head>
+    <meta charset=\"utf-8\">
+    <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
+    <title>Flash-cut Result</title>
+    <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css\">
+    <style>
+        body { background: #f8fafc; }
+        .centered { max-width: 540px; margin: 2rem auto; background: #fff; border-radius: 16px; box-shadow: 0 2px 16px #0001; padding: 2rem; }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+        .video-embed { width: 100%; max-width: 480px; aspect-ratio: 16/9; margin: 1.5rem auto; display: block; border-radius: 12px; box-shadow: 0 2px 8px #0002; }
+        .summary-list { list-style: none; padding: 0; margin: 0 0 1.5rem 0; }
+        .summary-list li { margin-bottom: 0.5rem; }
+    </style>
+</head>
+<body>
+    <main class=\"centered\">
+        <h2 style=\"text-align:center;\">Flash-cut Result</h2>
+        <ul class=\"summary-list\">
+            <li><b>Onsets:</b> {{ num_onsets }}</li>
+            <li><b>Segments:</b> {{ num_segments }}</li>
+            <li><b>Flash cuts:</b> {{ num_flash }} ({{ flash_start }}–{{ flash_end }} s)</li>
+            <li><b>FPS:</b> {{ fps }}</li>
+        </ul>
+        {% if rendered %}
+            <video class=\"video-embed\" controls>
+                <source src=\"{{ url_for('download', job_id=job_id, filename=output_name) }}\" type=\"video/mp4\">
+                Your browser does not support the video tag.
+            </video>
+        {% else %}
+            <p style=\"color:#f00;text-align:center;\">Video rendering failed or not available.</p>
+        {% endif %}
+        <p style=\"text-align:center;\"><a href=\"{{ url_for('index') }}\">← New analysis</a></p>
+    </main>
+</body>
+</html>
 """
 app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024  # 500 MB cap
 
@@ -204,11 +333,19 @@ def probe_video_meta(path: str):
         return 1280, 720, 0.0
 
 
-def render_from_videos(videos: List[str], starts: List[float], ends: List[float], audio: str, fps: float, out_path: str, clip_mode: str = "head") -> None:
+def render_from_videos(videos: List[str], starts: List[float], ends: List[float], audio: str, fps: float, out_path: str, clip_mode: str = "head", aspect_ratio: str = "16:9") -> None:
     if not videos:
         raise RuntimeError("No video files provided")
     ffmpeg = _ffmpeg_bin()
-    target_w, target_h, _ = probe_video_meta(videos[0])
+    
+    # Set dimensions based on aspect ratio
+    aspect_map = {
+        "16:9": (1280, 720),
+        "1:1": (720, 720),
+        "9:16": (720, 1280),
+        "4:3": (960, 720),
+    }
+    target_w, target_h = aspect_map.get(aspect_ratio, (1280, 720))
 
     tmp = Path(out_path).parent / "_preconv"
     tmp.mkdir(parents=True, exist_ok=True)
@@ -274,6 +411,7 @@ def analyze():
     if clip_mode not in {"head", "tail"}:
         clip_mode = "head"
     output_name = (request.form.get("output_name", "final_video.mp4") or "final_video.mp4").strip()
+    aspect_ratio = request.form.get("aspect_ratio", "16:9")
 
     job_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     job_dir = JOBS_DIR / job_id
@@ -314,6 +452,8 @@ def analyze():
     plot_waveform(job_dir / "waveform.png", y, sr, flash_times, (flash_start, flash_end))
 
     rendered = False
+    # Always render video (default checked)
+    do_render = True
     if do_render:
         saved_videos: List[str] = []
         for f in request.files.getlist("videos"):
@@ -325,7 +465,7 @@ def analyze():
         if saved_videos:
             out_path = job_dir / output_name
             try:
-                render_from_videos(saved_videos, starts, ends, str(audio_path), fps, str(out_path), clip_mode=clip_mode)
+                render_from_videos(saved_videos, starts, ends, str(audio_path), fps, str(out_path), clip_mode=clip_mode, aspect_ratio=aspect_ratio)
                 rendered = True
             except Exception as e:
                 flash(f"ffmpeg video render failed:\n{e}")
@@ -348,21 +488,13 @@ def analyze():
             else:
                 flash("No videos or PNGs were provided for rendering.")
 
-    preview_lines = []
-    for i, (s, e) in enumerate(zip(starts, ends)):
-        if i >= 100:
-            preview_lines.append("... (truncated)")
-            break
-        preview_lines.append(f"{i+1:03d}: {s:.3f} – {e:.3f}")
-    segments_preview = "\n".join(preview_lines)
-
+    # No CSV, PNG, or JSON links, no waveform or segments preview
     return render_template_string(
         RESULT_HTML,
         job_id=job_id,
         fps=fps, threshold=threshold, max_gap=max_gap,
         flash_start=flash_start, flash_end=flash_end,
         num_onsets=len(events), num_segments=len(starts), num_flash=len(flash_times),
-        segments_preview=segments_preview,
         rendered=rendered, output_name=output_name
     )
 
@@ -411,7 +543,12 @@ def plot_waveform(png_path: Path, y: np.ndarray, sr: int, flash_times: List[floa
     plt.tight_layout()
     plt.savefig(png_path, dpi=150)
     plt.close()
+
 # --- keep everything above as-is ---
+
+
+# --- Enhanced loading feedback (JS) ---
+# (Already handled in INDEX_HTML with spinner overlay. For stepwise feedback, would require AJAX or WebSocket.)
 
 @app.route("/health")
 def health():
