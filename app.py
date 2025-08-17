@@ -275,8 +275,18 @@ def detect_flash_window(y: np.ndarray, sr: int, window: Tuple[float, float], min
 
 # ---------------- rendering (PNG and VIDEO) ----------------
 
-def render_from_images(pngs: List[str], starts: List[float], ends: List[float], audio: str, fps: float, out_path: str) -> None:
+def render_from_images(pngs: List[str], starts: List[float], ends: List[float], audio: str, fps: float, out_path: str, aspect_ratio: str = "16:9") -> None:
     ffmpeg = _ffmpeg_bin()
+    
+    # Set dimensions based on aspect ratio
+    aspect_map = {
+        "16:9": (1280, 720),
+        "1:1": (720, 720),
+        "9:16": (720, 1280),
+        "4:3": (960, 720),
+    }
+    target_w, target_h = aspect_map.get(aspect_ratio, (1280, 720))
+    
     tmp = Path(out_path).parent / "_preconv"
     tmp.mkdir(parents=True, exist_ok=True)
     clip_paths = []
@@ -286,7 +296,7 @@ def render_from_images(pngs: List[str], starts: List[float], ends: List[float], 
         out_i = tmp / f"seg_{i:04d}.mp4"
         cmd = [
             ffmpeg, "-y", "-loop", "1", "-t", f"{length:.3f}", "-i", src,
-            "-vf", f"fps={int(fps)},scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black",
+            "-vf", f"fps={int(fps)},scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black",
             "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
             str(out_i),
         ]
@@ -481,7 +491,7 @@ def analyze():
             if pngs:
                 out_path = job_dir / output_name
                 try:
-                    render_from_images(pngs, starts, ends, str(audio_path), fps, str(out_path))
+                    render_from_images(pngs, starts, ends, str(audio_path), fps, str(out_path), aspect_ratio=aspect_ratio)
                     rendered = True
                 except Exception as e:
                     flash(f"ffmpeg image render failed:\n{e}")
