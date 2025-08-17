@@ -42,8 +42,10 @@ INDEX_HTML = """
         .advanced { display: none; margin-top: 1.5rem; }
         .show-advanced .advanced { display: block; }
         .toggle-adv { color: #2563eb; background: none; border: none; cursor: pointer; font-size: 1rem; margin-bottom: 1rem; }
-        .spinner-overlay { display: none; position: fixed; z-index: 9999; inset: 0; background: rgba(255,255,255,0.7); align-items: center; justify-content: center; }
-        .spinner { border: 6px solid #eee; border-top: 6px solid #2563eb; border-radius: 50%; width: 48px; height: 48px; animation: spin 1s linear infinite; }
+        .spinner-overlay { display: none; position: fixed; z-index: 9999; inset: 0; background: rgba(255,255,255,0.8); align-items: center; justify-content: center; flex-direction: column; }
+        .spinner { border: 6px solid #eee; border-top: 6px solid #2563eb; border-radius: 50%; width: 48px; height: 48px; animation: spin 1s linear infinite; margin-bottom: 1.5rem; }
+        .progress-msg { font-size: 1.2rem; font-weight: 500; color: #1e3a8a; text-align: center; max-width: 320px; }
+        .progress-substep { font-size: 0.9rem; color: #64748b; margin-top: 0.5rem; }
         @keyframes spin { 100% { transform: rotate(360deg); } }
     </style>
 </head>
@@ -112,11 +114,41 @@ INDEX_HTML = """
             </div>
             <button type=\"submit\" style=\"width:100%;font-size:1.2rem;margin-top:1.5rem;\">Analyze</button>
         </form>
-        <div class=\"spinner-overlay\" id=\"spinnerOverlay\"><div class=\"spinner\"></div></div>
+        <div class=\"spinner-overlay\" id=\"spinnerOverlay\">
+            <div class=\"spinner\"></div>
+            <div class=\"progress-msg\" id=\"progressMsg\">Preparing to analyze...</div>
+            <div class=\"progress-substep\" id=\"progressSubstep\"></div>
+        </div>
     </main>
     <script>
         document.getElementById('mainForm').addEventListener('submit', function() {
+            // Show spinner overlay
             document.getElementById('spinnerOverlay').style.display = 'flex';
+            
+            // Simulate progress updates
+            const progressMsg = document.getElementById('progressMsg');
+            const progressSubstep = document.getElementById('progressSubstep');
+            const steps = [
+                {msg: 'Processing audio file...', sub: 'Analyzing waveform', delay: 800},
+                {msg: 'Detecting onsets...', sub: 'Finding beats and segments', delay: 1500},
+                {msg: 'Creating segments...', sub: 'Mapping beats to time segments', delay: 1200},
+                {msg: 'Generating flash cuts...', sub: 'Calculating optimal cuts', delay: 1500},
+                {msg: 'Rendering media...', sub: 'Processing video clips', delay: 2000},
+                {msg: 'Finalizing output...', sub: 'Muxing audio and video', delay: 1500},
+            ];
+            
+            let stepIndex = 0;
+            function updateProgress() {
+                if (stepIndex < steps.length) {
+                    progressMsg.textContent = steps[stepIndex].msg;
+                    progressSubstep.textContent = steps[stepIndex].sub;
+                    stepIndex++;
+                    setTimeout(updateProgress, steps[stepIndex-1].delay);
+                }
+            }
+            
+            // Start progress simulation
+            setTimeout(updateProgress, 400);
         });
     </script>
 </body>
